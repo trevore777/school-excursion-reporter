@@ -1,0 +1,5 @@
+const G='https://graph.microsoft.com/v1.0';
+const enc=s=>encodeURIComponent(s).replace(/%2F/g,'/');
+async function call(token,path,options={}){const r=await fetch(G+path,{...options,headers:{Authorization:`Bearer ${token}`,...options.headers}});if(!r.ok)throw new Error(`Graph ${r.status}: ${await r.text()}`);return r.status===204?null:r.json()}
+export async function ensureFolder(token,driveId,path){let parent='root';for(const name of path.split('/').filter(Boolean)){let found;try{found=await call(token,`/drives/${driveId}/items/${parent}:/${enc(name)}`)}catch{}if(!found)found=await call(token,`/drives/${driveId}/items/${parent}/children`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,folder:{},'@microsoft.graph.conflictBehavior':'fail'})});parent=found.id}return parent}
+export async function upload(token,driveId,parentId,name,buffer,type='application/octet-stream'){return call(token,`/drives/${driveId}/items/${parentId}:/${enc(name)}:/content`,{method:'PUT',headers:{'Content-Type':type},body:buffer})}
