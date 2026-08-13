@@ -15,26 +15,15 @@ const app = express();
 
 const photosUp = multer({
   storage: multer.memoryStorage(),
-  limits: {
-    fileSize: 15 * 1024 * 1024,
-    files: 12
-  }
+  limits: { fileSize: 15 * 1024 * 1024, files: 12 }
 });
 
 const audioUp = multer({
   storage: multer.memoryStorage(),
-  limits: {
-    fileSize: 20 * 1024 * 1024,
-    files: 1
-  }
+  limits: { fileSize: 20 * 1024 * 1024, files: 1 }
 });
 
-app.use(
-  express.json({
-    limit: '1mb'
-  })
-);
-
+app.use(express.json({ limit: '1mb' }));
 app.use(
   session({
     secret: process.env.SESSION_SECRET || 'dev-only-change-me',
@@ -57,17 +46,10 @@ const microsoftConfigured = () =>
   );
 
 const sharePointConfigured = () =>
-  Boolean(
-    microsoftConfigured() &&
-      process.env.SHAREPOINT_DRIVE_ID
-  );
+  Boolean(microsoftConfigured() && process.env.SHAREPOINT_DRIVE_ID);
 
-const getAppUrl = () =>
-  process.env.APP_URL || 'http://localhost:5173';
+const getAppUrl = () => process.env.APP_URL || 'http://localhost:5173';
 
-/**
- * Status
- */
 app.get('/api/status', (req, res) => {
   res.json({
     aiConfigured: Boolean(process.env.OPENAI_API_KEY),
@@ -78,42 +60,26 @@ app.get('/api/status', (req, res) => {
   });
 });
 
-/**
- * Microsoft sign-in
- */
 app.get('/api/auth/login', async (req, res) => {
   try {
     if (!microsoftConfigured()) {
-      return res.status(503).send(
-        'Microsoft sign-in is not configured yet.'
-      );
+      return res.status(503).send('Microsoft sign-in is not configured yet.');
     }
-
-    const url = await loginUrl();
-    res.redirect(url);
+    res.redirect(await loginUrl());
   } catch (error) {
     console.error('Microsoft login error:', error);
     res.status(503).send(error.message);
   }
 });
 
-/**
- * Microsoft callback
- */
 app.get('/api/auth/callback', async (req, res) => {
   try {
     if (!req.query.code) {
       throw new Error('Microsoft did not return an authorization code.');
     }
-
     const result = await redeem(req.query.code);
-
     req.session.graphToken = result.accessToken;
-    req.session.user =
-      result.account?.username ||
-      result.account?.name ||
-      null;
-
+    req.session.user = result.account?.username || result.account?.name || null;
     res.redirect(getAppUrl());
   } catch (error) {
     console.error('Microsoft callback error:', error);
@@ -121,218 +87,156 @@ app.get('/api/auth/callback', async (req, res) => {
   }
 });
 
-/**
- * Microsoft logout
- */
 app.get('/api/auth/logout', (req, res) => {
-  req.session.destroy(() => {
-    res.redirect(getAppUrl());
-  });
+  req.session.destroy(() => res.redirect(getAppUrl()));
 });
 
-/**
- * Voice-note transcription
- */
-app.post(
-  '/api/notes/transcribe',
-  audioUp.single('audio'),
-  async (req, res) => {
-    try {
-      if (!req.file) {
-        throw new Error('No audio was received.');
-      }
-
-      if (!process.env.OPENAI_API_KEY) {
-        return res.status(503).json({
-          error: 'OpenAI is not configured.'
-        });
-      }
-
-      const text = await transcribeAudio(
-        req.file.buffer,
-        req.file.mimetype
-      );
-
-      res.json({
-        text
-      });
-    } catch (error) {
-      console.error('Transcription error:', error);
-
-      res.status(500).json({
-        error: error.message
-      });
+app.post('/api/notes/transcribe', audioUp.single('audio'), async (req, res) => {
+  try {
+    if (!req.file) throw new Error('No audio was received.');
+    if (!process.env.OPENAI_API_KEY) {
+      return res.status(503).json({ error: 'OpenAI is not configured.' });
     }
+    const text = await transcribeAudio(req.file.buffer, req.file.mimetype);
+    res.json({ text });
+  } catch (error) {
+    console.error('Transcription error:', error);
+    res.status(500).json({ error: error.message });
   }
-);
+});
 
-/**
- * AI excursion-report generation
- */
 app.post('/api/reports/generate', async (req, res) => {
   try {
     if (!process.env.OPENAI_API_KEY) {
-      return res.status(503).json({
-        error: 'OpenAI is not configured.'
-      });
+      return res.status(503).json({ error: 'OpenAI is not configured.' });
     }
-
-    const report = await generateReport(req.body);
-
-    res.json(report);
+    res.json(await generateReport(req.body));
   } catch (error) {
-    console.error('Report generation error:', error);
-
-    res.status(500).json({
-      error: error.message
-    });
+    console.error('Article generation error:', error);
+    res.status(500).json({ error: error.message });
   }
 });
 
-/**
- * Save excursion report and photos to SharePoint
- */
-app.post(
-  '/api/sharepoint/save',
-  photosUp.array('photos', 12),
-  async (req, res) => {
-    try {
-      if (!sharePointConfigured()) {
-        return res.status(503).json({
-          error:
-            'SharePoint connection is pending IT configuration.'
-        });
-      }
+app.post('/api/reports/pdf', photosUp.array('photos', 12), async (req, res) => {
+  try {
+    if (!req.body.report) {
+      return res.status(400).json({ error: 'No article data was received.' });
+    }
 
-      if (!req.session.graphToken) {
-        return res.status(401).json({
-          error: 'Sign in with Microsoft first.'
-        });
-      }
+    const article = JSON.parse(req.body.report);
+    const captions = article.photoCaptions || [];
+    const processedPhotos = await processPhotos(req.files || [], captions);
+    const pdf = await makePdf(article, processedPhotos);
+    const safeName = safeFileName(article.excursionName || 'Excursion');
+    const date = article.excursionDate || new Date().toISOString().slice(0, 10);
+    const filename = `${date}_${safeName}_News-Article.pdf`;
 
-      if (!req.body.report) {
-        return res.status(400).json({
-          error: 'No report data was received.'
-        });
-      }
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(pdf);
+  } catch (error) {
+    console.error('PDF export error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
 
-      const report = JSON.parse(req.body.report);
+app.post('/api/sharepoint/save', photosUp.array('photos', 12), async (req, res) => {
+  try {
+    if (!sharePointConfigured()) {
+      return res.status(503).json({
+        error: 'SharePoint connection is pending IT configuration.'
+      });
+    }
+    if (!req.session.graphToken) {
+      return res.status(401).json({ error: 'Sign in with Microsoft first.' });
+    }
+    if (!req.body.report) {
+      return res.status(400).json({ error: 'No article data was received.' });
+    }
 
-      const safeName =
-        (report.excursionName || 'Excursion')
-          .replace(/[^a-z0-9 _-]/gi, '')
-          .trim() || 'Excursion';
+    const article = JSON.parse(req.body.report);
+    const safeName = safeFileName(article.excursionName || 'Excursion');
+    const date = article.excursionDate || new Date().toISOString().slice(0, 10);
+    const year = (date.match(/^\d{4}/) || [String(new Date().getFullYear())])[0];
+    const rootFolder = process.env.SHAREPOINT_ROOT_FOLDER || 'School Excursion Reports';
+    const folderPath = `${rootFolder}/${year}/${date} - ${safeName}`;
+    const parentFolderId = await ensureFolder(
+      req.session.graphToken,
+      process.env.SHAREPOINT_DRIVE_ID,
+      folderPath
+    );
 
-      const date =
-        report.excursionDate ||
-        new Date().toISOString().slice(0, 10);
+    const captions = article.photoCaptions || [];
+    const processedPhotos = await processPhotos(req.files || [], captions);
+    const uploadedFiles = [];
 
-      const year =
-        (
-          date.match(/^\d{4}/) || [
-            String(new Date().getFullYear())
-          ]
-        )[0];
-
-      const rootFolder =
-        process.env.SHAREPOINT_ROOT_FOLDER ||
-        'School Excursion Reports';
-
-      const folderPath =
-        `${rootFolder}/${year}/${date} - ${safeName}`;
-
-      const parentFolderId = await ensureFolder(
-        req.session.graphToken,
-        process.env.SHAREPOINT_DRIVE_ID,
-        folderPath
-      );
-
-      const uploadedFiles = [];
-
-      /**
-       * Generate and upload PDF
-       */
-      const pdf = await makePdf(report);
-
-      const pdfResult = await upload(
+    const pdf = await makePdf(article, processedPhotos);
+    uploadedFiles.push(
+      await upload(
         req.session.graphToken,
         process.env.SHAREPOINT_DRIVE_ID,
         parentFolderId,
-        `${date}_${safeName}_Excursion-Report.pdf`,
+        `${date}_${safeName}_News-Article.pdf`,
         pdf,
         'application/pdf'
-      );
+      )
+    );
 
-      uploadedFiles.push(pdfResult);
-
-      /**
-       * Resize/compress and upload photographs
-       */
-      let photoNumber = 1;
-
-      for (const file of req.files || []) {
-        const image = await sharp(file.buffer)
-          .rotate()
-          .resize({
-            width: 1800,
-            height: 1800,
-            fit: 'inside',
-            withoutEnlargement: true
-          })
-          .jpeg({
-            quality: 82
-          })
-          .toBuffer();
-
-        const filename =
-          `${date}_${safeName}_Photo-` +
-          `${String(photoNumber).padStart(2, '0')}.jpg`;
-
-        const photoResult = await upload(
+    for (let i = 0; i < processedPhotos.length; i += 1) {
+      uploadedFiles.push(
+        await upload(
           req.session.graphToken,
           process.env.SHAREPOINT_DRIVE_ID,
           parentFolderId,
-          filename,
-          image,
+          `${date}_${safeName}_Photo-${String(i + 1).padStart(2, '0')}.jpg`,
+          processedPhotos[i].buffer,
           'image/jpeg'
-        );
-
-        uploadedFiles.push(photoResult);
-
-        photoNumber += 1;
-      }
-
-      res.json({
-        ok: true,
-        files: uploadedFiles.map(file => ({
-          id: file.id,
-          name: file.name,
-          webUrl: file.webUrl
-        }))
-      });
-    } catch (error) {
-      console.error('SharePoint save error:', error);
-
-      res.status(500).json({
-        error: error.message
-      });
+        )
+      );
     }
-  }
-);
 
-/**
- * Simple API health check
- */
-app.get('/api/health', (req, res) => {
-  res.json({
-    ok: true,
-    service: 'School Excursion Reporter API'
-  });
+    res.json({
+      ok: true,
+      files: uploadedFiles.map(file => ({
+        id: file.id,
+        name: file.name,
+        webUrl: file.webUrl
+      }))
+    });
+  } catch (error) {
+    console.error('SharePoint save error:', error);
+    res.status(500).json({ error: error.message });
+  }
 });
 
-/**
- * Vercel imports this Express application.
- *
- * Do NOT call app.listen() here.
- */
+app.get('/api/health', (req, res) => {
+  res.json({ ok: true, service: 'School Excursion Reporter API' });
+});
+
+async function processPhotos(files, captions) {
+  const result = [];
+  for (let i = 0; i < files.length; i += 1) {
+    const buffer = await sharp(files[i].buffer)
+      .rotate()
+      .resize({
+        width: 1800,
+        height: 1800,
+        fit: 'inside',
+        withoutEnlargement: true
+      })
+      .jpeg({ quality: 82 })
+      .toBuffer();
+
+    result.push({
+      buffer,
+      caption: captions[i]?.caption || ''
+    });
+  }
+  return result;
+}
+
+function safeFileName(value) {
+  return value.replace(/[^a-z0-9 _-]/gi, '').trim() || 'Excursion';
+}
+
 export default app;
