@@ -1,10 +1,179 @@
 import PDFDocument from 'pdfkit';
-export function makePdf(r){return new Promise(resolve=>{
-  const doc=new PDFDocument({margin:50,info:{Title:`${r.excursionName||'Excursion'} - School Excursion Report`}});const chunks=[];doc.on('data',c=>chunks.push(c));doc.on('end',()=>resolve(Buffer.concat(chunks)));
-  doc.fontSize(22).text(r.reportType||'School Excursion Report');
-  doc.moveDown().fontSize(11).text(`Excursion / event: ${r.excursionName||'—'}`).text(`Venue: ${r.venue||'—'}`).text(`Date: ${formatDate(r.excursionDate)}`).text(`Year level(s): ${r.yearLevels||'—'}`).text(`Subject / program: ${r.subject||'—'}`).text(`Staff / teacher: ${r.staff||'—'}`);
-  for(const [h,v] of [['Excursion overview',r.summary],['Activities and experiences',r.activities],['Learning and educational value',r.learningOutcomes],['Student engagement / observations',r.studentEngagement],['Follow-up / next steps',r.followUp],['Additional notes',r.additionalNotes]]){doc.moveDown().fontSize(14).text(h);doc.fontSize(11).text(v||'—')}
-  const captions=(r.photoCaptions||[]).filter(x=>x.caption?.trim());if(captions.length){doc.moveDown().fontSize(14).text('Photo captions');doc.fontSize(11);captions.forEach(x=>doc.text(`Photo ${x.number}: ${x.caption}`))}
-  doc.moveDown(2).fontSize(8).fillColor('#66788a').text('Prepared from teacher-supplied excursion details and notes. Reviewed by the user before saving.');doc.end();
-})}
-function formatDate(v){if(!v)return new Date().toLocaleDateString('en-AU');const d=new Date(`${v}T00:00:00`);return Number.isNaN(d.getTime())?v:d.toLocaleDateString('en-AU')}
+
+export function makePdf(article, photos = []) {
+  return new Promise((resolve, reject) => {
+    const title = article.headline || article.excursionName || 'School Excursion News';
+    const doc = new PDFDocument({
+      size: 'A4',
+      margin: 46,
+      info: { Title: title }
+    });
+
+    const chunks = [];
+    doc.on('data', chunk => chunks.push(chunk));
+    doc.on('end', () => resolve(Buffer.concat(chunks)));
+    doc.on('error', reject);
+
+    const pageWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+
+    doc
+      .font('Helvetica-Bold')
+      .fontSize(10)
+      .fillColor('#486581')
+      .text('SCHOOL EXCURSION NEWS');
+
+    doc.moveDown(0.5);
+    doc
+      .font('Helvetica-Bold')
+      .fontSize(25)
+      .fillColor('#102a43')
+      .text(title, { lineGap: 2 });
+
+    if (article.subheadline) {
+      doc.moveDown(0.45);
+      doc
+        .font('Helvetica')
+        .fontSize(13)
+        .fillColor('#486581')
+        .text(article.subheadline, { lineGap: 2 });
+    }
+
+    doc.moveDown(0.8);
+    doc
+      .font('Helvetica')
+      .fontSize(9.5)
+      .fillColor('#627d98')
+      .text(metadataLine(article));
+
+    if (photos.length) {
+      doc.moveDown(0.9);
+      addImage(doc, photos[0].buffer, pageWidth, 285);
+      addCaption(doc, photos[0].caption, 1);
+    }
+
+    const paragraphs = splitParagraphs(article.articleBody);
+    paragraphs.forEach((paragraph, index) => {
+      ensureSpace(doc, 120);
+      doc.moveDown(index === 0 ? 0.8 : 0.55);
+      doc
+        .font('Helvetica')
+        .fontSize(11.2)
+        .fillColor('#243b53')
+        .text(paragraph, {
+          lineGap: 3,
+          align: 'left'
+        });
+
+      const photoIndex = index + 1;
+      if (photoIndex < photos.length && (index % 2 === 1 || index === paragraphs.length - 1)) {
+        ensureSpace(doc, 250);
+        doc.moveDown(0.8);
+        addImage(doc, photos[photoIndex].buffer, pageWidth, 230);
+        addCaption(doc, photos[photoIndex].caption, photoIndex + 1);
+      }
+    });
+
+    if (article.learningConnection) {
+      ensureSpace(doc, 120);
+      doc.moveDown(1);
+      doc
+        .font('Helvetica-Bold')
+        .fontSize(12)
+        .fillColor('#102a43')
+        .text('Learning connection');
+      doc.moveDown(0.25);
+      doc
+        .font('Helvetica')
+        .fontSize(10.5)
+        .fillColor('#334e68')
+        .text(article.learningConnection, { lineGap: 2.5 });
+    }
+
+    if (article.closingNote) {
+      ensureSpace(doc, 90);
+      doc.moveDown(0.8);
+      doc
+        .font('Helvetica-Oblique')
+        .fontSize(9.5)
+        .fillColor('#627d98')
+        .text(article.closingNote, { lineGap: 2 });
+    }
+
+    // Add any photos not already placed in the article.
+    const usedCount = Math.min(photos.length, paragraphs.length + 1);
+    for (let i = usedCount; i < photos.length; i += 1) {
+      doc.addPage();
+      doc
+        .font('Helvetica-Bold')
+        .fontSize(15)
+        .fillColor('#102a43')
+        .text(`Photo ${i + 1}`);
+      doc.moveDown(0.7);
+      addImage(doc, photos[i].buffer, pageWidth, 500);
+      addCaption(doc, photos[i].caption, i + 1);
+    }
+
+    doc.end();
+  });
+}
+
+function metadataLine(article) {
+  const parts = [];
+  if (article.excursionDate) parts.push(formatDate(article.excursionDate));
+  if (article.venue) parts.push(article.venue);
+  if (article.yearLevels) parts.push(article.yearLevels);
+  if (article.subject) parts.push(article.subject);
+  if (article.staff) parts.push(`By ${article.staff}`);
+  return parts.join('  •  ') || 'School excursion article';
+}
+
+function splitParagraphs(value) {
+  const text = String(value || '').trim();
+  if (!text) return ['Excursion details were recorded by the supervising teacher.'];
+  return text
+    .split(/\n\s*\n/)
+    .map(item => item.trim())
+    .filter(Boolean);
+}
+
+function addImage(doc, buffer, width, maxHeight) {
+  try {
+    doc.image(buffer, {
+      fit: [width, maxHeight],
+      align: 'center',
+      valign: 'center'
+    });
+  } catch {
+    doc
+      .font('Helvetica-Oblique')
+      .fontSize(9)
+      .fillColor('#829ab1')
+      .text('Photo could not be rendered in the PDF.');
+  }
+}
+
+function addCaption(doc, caption, number) {
+  if (!caption?.trim()) return;
+  doc.moveDown(0.25);
+  doc
+    .font('Helvetica-Oblique')
+    .fontSize(8.8)
+    .fillColor('#627d98')
+    .text(`Photo ${number}: ${caption.trim()}`, { align: 'left' });
+}
+
+function ensureSpace(doc, requiredHeight) {
+  const bottom = doc.page.height - doc.page.margins.bottom;
+  if (doc.y + requiredHeight > bottom) doc.addPage();
+}
+
+function formatDate(value) {
+  const d = new Date(`${value}T00:00:00`);
+  return Number.isNaN(d.getTime())
+    ? value
+    : d.toLocaleDateString('en-AU', {
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric'
+      });
+}
