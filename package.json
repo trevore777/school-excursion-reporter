@@ -22,12 +22,12 @@
     "sharp": "^0.34.3"
   },
   "devDependencies": {
+    "@vitejs/plugin-basic-ssl": "^2.3.0",
     "@vitejs/plugin-react": "latest",
     "concurrently": "latest",
-    "vite": "latest",
     "react": "latest",
     "react-dom": "latest",
-    "@vitejs/plugin-basic-ssl": "latest"
+    "vite": "latest"
   },
   "version": "1.2.0"
 }
