@@ -1,27 +1,58 @@
 import OpenAI from 'openai';
 
-export async function generateReport(input){
-  if(!process.env.OPENAI_API_KEY)return fallback(input);
-  const client=new OpenAI({apiKey:process.env.OPENAI_API_KEY});
-  const response=await client.responses.create({
-    model:process.env.OPENAI_MODEL||'gpt-5-mini',
-    input:[
-      {role:'system',content:`You draft concise professional SCHOOL EXCURSION reports for teachers and school records. This is not an industrial inspection report. Turn rough teacher notes into clear educational reporting language. Use only information supplied by the teacher. Do not invent speakers, companies, activities, student reactions, curriculum outcomes, incidents, dates, numbers, safety issues or conclusions. Do not demand industrial inspection details. If notes are sparse, write a short useful report from what is known and use neutral wording such as "The purpose of the excursion was...". Return only valid JSON with exactly these string keys: summary, activities, learningOutcomes, studentEngagement, followUp, additionalNotes.`},
-      {role:'user',content:JSON.stringify(input)}
+export async function generateReport(input) {
+  if (!process.env.OPENAI_API_KEY) return fallback(input);
+
+  const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  const response = await client.responses.create({
+    model: process.env.OPENAI_MODEL || 'gpt-5-mini',
+    input: [
+      {
+        role: 'system',
+        content: `You are a school communications writer. Turn teacher-supplied excursion notes into a polished NEWS ARTICLE suitable for a school newsletter, website or parent communication.
+
+Write in an engaging but factual school-news style. This is not an industrial report and not a compliance report.
+
+Rules:
+- Use only facts supplied by the teacher.
+- Do not invent speakers, organisations, activities, quotes, student reactions, learning outcomes, incidents, dates, numbers or achievements.
+- Do not claim every student felt or learned something unless the notes support it.
+- Where the notes are brief, keep the article concise rather than filling gaps with invented detail.
+- Prefer active, readable language and Australian English.
+- The articleBody should be 3 to 6 short paragraphs when enough information is available.
+- Mention the venue, year levels, subject/program and educational purpose naturally when supplied.
+- Do not include markdown headings inside articleBody.
+
+Return only valid JSON with exactly these string keys:
+headline, subheadline, articleBody, learningConnection, closingNote.`
+      },
+      {
+        role: 'user',
+        content: JSON.stringify(input)
+      }
     ]
   });
-  try{return JSON.parse(response.output_text)}catch{return fallback(input)}
+
+  try {
+    return JSON.parse(response.output_text);
+  } catch {
+    return fallback(input);
+  }
 }
 
-function fallback(i){
-  const name=i.excursionName||'the excursion';
-  const venue=i.venue?` at ${i.venue}`:'';
-  return{
-    summary:`${name}${venue} was recorded as part of the school excursion program. ${i.notes||''}`.trim(),
-    activities:'See the teacher notes for the activities and experiences recorded during the excursion.',
-    learningOutcomes:'Educational outcomes should be confirmed from the observations recorded by the supervising teacher.',
-    studentEngagement:'Student engagement was not specifically described in the supplied notes.',
-    followUp:'Add any classroom follow-up, reflection task or further action identified from the excursion.',
-    additionalNotes:'Draft generated from the supplied excursion details and teacher notes only.'
-  }
+function fallback(i) {
+  const name = i.excursionName || 'School excursion';
+  const venue = i.venue ? ` at ${i.venue}` : '';
+  const yearLevels = i.yearLevels ? `${i.yearLevels} students` : 'Students';
+  const subject = i.subject ? ` as part of ${i.subject}` : '';
+
+  return {
+    headline: `${name}: learning beyond the classroom`,
+    subheadline: `${yearLevels} took part in an off-campus learning experience${venue}.`,
+    articleBody: `${yearLevels} participated in ${name}${venue}${subject}.\n\n${i.notes || 'The excursion provided an opportunity to extend learning beyond the classroom.'}`.trim(),
+    learningConnection: i.subject
+      ? `The experience supported learning connected with ${i.subject}.`
+      : 'The excursion extended student learning beyond the classroom.',
+    closingNote: 'This article was prepared from the excursion details and teacher notes supplied.'
+  };
 }
