@@ -45,10 +45,13 @@ export function makePdf(article, photos = []) {
       .fillColor('#627d98')
       .text(metadataLine(article));
 
+    let nextPhoto = 0;
+
     if (photos.length) {
       doc.moveDown(0.9);
       addImage(doc, photos[0].buffer, pageWidth, 285);
       addCaption(doc, photos[0].caption, 1);
+      nextPhoto = 1;
     }
 
     const paragraphs = splitParagraphs(article.articleBody);
@@ -64,12 +67,13 @@ export function makePdf(article, photos = []) {
           align: 'left'
         });
 
-      const photoIndex = index + 1;
-      if (photoIndex < photos.length && (index % 2 === 1 || index === paragraphs.length - 1)) {
+      const shouldInsertPhoto = (index % 2 === 1 || index === paragraphs.length - 1) && nextPhoto < photos.length;
+      if (shouldInsertPhoto) {
         ensureSpace(doc, 250);
         doc.moveDown(0.8);
-        addImage(doc, photos[photoIndex].buffer, pageWidth, 230);
-        addCaption(doc, photos[photoIndex].caption, photoIndex + 1);
+        addImage(doc, photos[nextPhoto].buffer, pageWidth, 230);
+        addCaption(doc, photos[nextPhoto].caption, nextPhoto + 1);
+        nextPhoto += 1;
       }
     });
 
@@ -99,18 +103,17 @@ export function makePdf(article, photos = []) {
         .text(article.closingNote, { lineGap: 2 });
     }
 
-    // Add any photos not already placed in the article.
-    const usedCount = Math.min(photos.length, paragraphs.length + 1);
-    for (let i = usedCount; i < photos.length; i += 1) {
+    while (nextPhoto < photos.length) {
       doc.addPage();
       doc
         .font('Helvetica-Bold')
         .fontSize(15)
         .fillColor('#102a43')
-        .text(`Photo ${i + 1}`);
+        .text(`Photo ${nextPhoto + 1}`);
       doc.moveDown(0.7);
-      addImage(doc, photos[i].buffer, pageWidth, 500);
-      addCaption(doc, photos[i].caption, i + 1);
+      addImage(doc, photos[nextPhoto].buffer, pageWidth, 500);
+      addCaption(doc, photos[nextPhoto].caption, nextPhoto + 1);
+      nextPhoto += 1;
     }
 
     doc.end();
